@@ -11,9 +11,9 @@ struct Point {
 struct MBR {
     double minX, minY, maxX, maxY;
 
-    // heavy
+    // initialize mbr
     static MBR empty() {
-        double inf = std::numeric_limits<double>::infinity();   // something easier?
+        double inf = std::numeric_limits<double>::infinity();   
         return { inf, inf, -inf, -inf };
     }
 

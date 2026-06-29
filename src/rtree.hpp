@@ -79,18 +79,22 @@ public:
     // ---- Consulta por rango rectangular ----
     // 'visitedNodes' acumula cuantos nodos se examinaron (metrica vs busqueda lineal).
     // 'visitadas' (opcional): si se pasa, guarda el MBR de cada nodo examinado (para dibujar).
+    // 'pasoResultado' (opcional): por cada resultado, el nro de paso (nodos visitados) en que
+    //   se encontro, para revelarlos en sincronia con las cajas en la visualizacion.
     std::vector<const SpatialObject*> rangeQuery(const MBR& region, long long& visitedNodes,
-                                                 std::vector<MBR>* visitadas = nullptr) const {
+                                                 std::vector<MBR>* visitadas = nullptr,
+                                                 std::vector<int>* pasoResultado = nullptr) const {
         std::vector<const SpatialObject*> res;
         visitedNodes = 0;
-        rangeRec(root_, region, res, visitedNodes, visitadas);
+        rangeRec(root_, region, res, visitedNodes, visitadas, pasoResultado);
         return res;
     }
 
     // ---- KNN: k vecinos mas cercanos a un punto ----
     // Recorrido best-first con poda por mindist sobre los MBRs.
     std::vector<const SpatialObject*> kNN(const Point& q, int k, long long& visitedNodes,
-                                          std::vector<MBR>* visitadas = nullptr) const {
+                                          std::vector<MBR>* visitadas = nullptr,
+                                          std::vector<int>* pasoResultado = nullptr) const {
         visitedNodes = 0;
         // Cola de prioridad por menor distancia: entradas (nodo o objeto).
         struct QItem {
@@ -108,6 +112,7 @@ public:
             QItem it = pq.top(); pq.pop();
             if (it.isObj) {
                 res.push_back(it.obj);
+                if (pasoResultado) pasoResultado->push_back((int)visitedNodes);
                 continue;
             }
             ++visitedNodes;
@@ -274,14 +279,17 @@ private:
     // --- Busqueda por rango ---
     void rangeRec(const Node* n, const MBR& region,
                   std::vector<const SpatialObject*>& res, long long& visited,
-                  std::vector<MBR>* visitadas) const {
+                  std::vector<MBR>* visitadas, std::vector<int>* pasoResultado) const {
         ++visited;
         if (visitadas) visitadas->push_back(nodeMBR(n));
         for (const auto& e : n->entries) {
             if (n->leaf) {
-                if (region.contains(e.obj->point())) res.push_back(e.obj);
+                if (region.contains(e.obj->point())) {
+                    res.push_back(e.obj);
+                    if (pasoResultado) pasoResultado->push_back((int)visited);
+                }
             } else if (region.intersects(e.mbr)) {
-                rangeRec(e.child, region, res, visited, visitadas);
+                rangeRec(e.child, region, res, visited, visitadas, pasoResultado);
             }
         }
     }

@@ -9,5 +9,6 @@ struct SpatialObject {
     double x, y;          // x = longitud, y = latitud
     std::string category; // code de GeoNames
 
+    // to insert from point
     Point point() const { return { x, y }; }
 };

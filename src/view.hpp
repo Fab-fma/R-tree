@@ -1,9 +1,4 @@
 #pragma once
-// ============================================================================
-//  view.hpp - utilidades compartidas por las dos ventanas (rango y KNN).
-//  Maneja: el mapeo mundo<->pantalla, dibujar MBRs, la textura de puntos
-//  (optimizacion de rendimiento) y la medicion de tiempos promediada.
-// ============================================================================
 #include "raylib.h"
 #include <vector>
 #include <chrono>
@@ -14,16 +9,11 @@ const int   SCREEN_W = 1000;
 const int   SCREEN_H = 700;
 const float MARGIN   = 40.0f;   // borde para que los puntos no toquen el filo
 
-// ----------------------------------------------------------------------------
-//  View: convierte coordenadas del mundo (lon/lat) <-> pixeles de la ventana.
-//  Es un mapeo lineal de un rango a otro. En pantalla la Y crece hacia ABAJO
-//  pero la latitud crece hacia ARRIBA, por eso la Y se invierte.
-//
-//  Encima del mapeo base se aplican 'zoom' (escala) y 'pan' (desplazamiento en
-//  pixeles), para poder acercar y moverse por el mapa.
-// ----------------------------------------------------------------------------
+//  View: lon/lat <-> pixeles de la ventana.
+//  invertir y por crecimiento de latitud
+
 struct View {
-    double minX, minY, maxX, maxY;   // limites del mundo (lon/lat del dataset)
+    double minX, minY, maxX, maxY;   // limites del mundo, lon/lat 
     float   zoom = 1.0f;             // factor de acercamiento
     Vector2 pan  = { 0, 0 };         // desplazamiento en pixeles
 
@@ -77,19 +67,17 @@ inline View makeView(const std::vector<SpatialObject>& objs) {
     return v;
 }
 
-// Dibuja un MBR (rectangulo del mundo) como rectangulo en pantalla.
+// Dibuja un MBR como rectangulo en pantalla.
 inline void drawMBR(const View& v, const MBR& m, Color c, float thick) {
-    Vector2 a = v.worldToScreen(m.minX, m.maxY); // esquina superior-izquierda
-    Vector2 b = v.worldToScreen(m.maxX, m.minY); // esquina inferior-derecha
+    Vector2 a = v.worldToScreen(m.minX, m.maxY);    // esquina superior-izquierda
+    Vector2 b = v.worldToScreen(m.maxX, m.minY);    // esquina inferior-derecha
     Rectangle r{ a.x, a.y, b.x - a.x, b.y - a.y };
     DrawRectangleLinesEx(r, thick, c);
 }
 
-// ----------------------------------------------------------------------------
 //  Dibuja todos los puntos del dataset (un pixel por punto). Con ~25k puntos
 //  esto es barato de hacer cada frame, y al pasar por worldToScreen respeta el
 //  zoom y el pan automaticamente.
-// ----------------------------------------------------------------------------
 inline void drawPoints(const View& v, const std::vector<SpatialObject>& objs) {
     for (const auto& o : objs) {
         Vector2 s = v.worldToScreen(o.x, o.y);
@@ -97,11 +85,17 @@ inline void drawPoints(const View& v, const std::vector<SpatialObject>& objs) {
     }
 }
 
-// ----------------------------------------------------------------------------
+// Overload: dibuja desde un conjunto vivo de punteros (cuando se inserta/elimina).
+inline void drawPoints(const View& v, const std::vector<const SpatialObject*>& objs) {
+    for (auto* o : objs) {
+        Vector2 s = v.worldToScreen(o->x, o->y);
+        DrawPixelV(s, GRAY);
+    }
+}
+
 //  Medicion de tiempo estable: corre 'fn' N veces y devuelve el promedio en ms.
 //  Una sola consulta dura microsegundos y el numero salta mucho; promediar da
 //  un valor fiable.
-// ----------------------------------------------------------------------------
 template <typename Fn>
 double medirMs(Fn fn, int N) {
     using Clock = std::chrono::high_resolution_clock;
