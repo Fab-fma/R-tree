@@ -37,14 +37,14 @@ struct MBR {
         maxY = std::max(maxY, o.maxY);
     }
 
-    // return a bigger box inluding the two (inside a) 
+    // caja que envuelve a las dos (union)
     static MBR combine(const MBR& a, const MBR& b) {
         MBR r = a;
         r.expand(b);
         return r;
     }
 
-    // gets bigger if it needs to include a point
+    // cuanto crece el area si tuviera que incluir o. clave para chooseLeaf y el split.
     double enlargement(const MBR& o) const {
         return combine(*this, o).area() - area();
     }
@@ -54,15 +54,15 @@ struct MBR {
         return p.x >= minX && p.x <= maxX && p.y >= minY && p.y <= maxY;
     }
 
-    // will like to know why
+    // alias de contains
     bool intersectsPoint(const Point& p) const { return contains(p); }
 
-    // true is this mbr is in some are of other mbr
+    // true si las dos cajas se solapan (rango: por aca se decide a que hijos bajar)
     bool intersects(const MBR& o) const {
         return !(o.minX > maxX || o.maxX < minX || o.minY > maxY || o.maxY < minY);
     }
 
-    // min distance of a point to this mbr
+    // distancia^2 minima de un punto a la caja (0 si esta dentro). cota para podar en KNN.
     double mindist2(const Point& p) const {
         double dx = 0.0, dy = 0.0;
         if (p.x < minX) dx = minX - p.x; else if (p.x > maxX) dx = p.x - maxX;

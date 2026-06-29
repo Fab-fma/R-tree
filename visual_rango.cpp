@@ -1,19 +1,5 @@
-// ============================================================================
-//  visual_rango.cpp - Consulta por RANGO rectangular (R-Tree vs busqueda lineal)
-//
-//  Controles:
-//    - Arrastrar clic IZQUIERDO -> definir el rectangulo de consulta
-//    - ESPACIO / R              -> revelar paso a paso (cajas + resultados) / reiniciar
-//    - I                        -> insertar un punto en el cursor
-//    - D                        -> eliminar el punto mas cercano al cursor
-//    - Rueda = zoom  |  clic DERECHO arrastrar = mover
-//
-//  Al insertar/eliminar se vuelve a ejecutar la consulta activa, asi el resultado
-//  refleja el cambio. Almacen en deque para que los punteros del arbol no se
-//  invaliden (ver nota en visual_editar.cpp).
-//
-//  Compilar: usar rango.bat
-// ============================================================================
+// consulta por RANGO. arrastrar = rectangulo. ESPACIO/R = paso a paso. I/D = insertar/eliminar.
+// rueda = zoom, clic derecho = mover. compilar: rango.bat
 #include "raylib.h"
 #include <vector>
 #include <deque>
@@ -74,7 +60,8 @@ int main(int argc, char** argv) {
     std::vector<SpatialObject> cargados = loadGeoNames(argv[1]);
     if (cargados.empty()) { TraceLog(LOG_ERROR, "No se cargaron objetos."); return 1; }
 
-    // Almacen estable (deque) + conjunto vivo (punteros) sobre el que opera la lineal.
+    // deque = almacen estable (insertar no mueve direcciones, asi los punteros del arbol
+    // siguen validos). 'vivos' = punteros vivos, sobre los que dibuja y corre la lineal.
     std::deque<SpatialObject> almacen(cargados.begin(), cargados.end());
     std::vector<const SpatialObject*> vivos;
     for (const auto& o : almacen) vivos.push_back(&o);
@@ -161,31 +148,33 @@ int main(int argc, char** argv) {
         // ---- Dibujo ----
         BeginDrawing();
         ClearBackground((Color){ 20, 20, 30, 255 });
-        drawPoints(view, vivos);                                // (1) puntos
+        drawPoints(view, vivos);
 
-        for (int i = 0; i < mostrados; ++i) {                   // (6) regiones visitadas
+        // cajas recorridas (naranja); el ultimo paso resaltado
+        for (int i = 0; i < mostrados; ++i) {
             bool ultimo = (i == mostrados - 1);
             drawMBR(view, res.visitadas[i],
                     ultimo ? ORANGE : Fade(ORANGE, 0.5f), ultimo ? 2.5f : 1.5f);
         }
 
         if (res.hecho) {
-            drawMBR(view, res.region, YELLOW, 2.0f);            // (2) region consultada
-            for (size_t i = 0; i < res.objetos.size(); ++i)     // (4) resultados por paso
+            drawMBR(view, res.region, YELLOW, 2.0f);            // region consultada
+            // resultados, solo los ya revelados por el paso a paso
+            for (size_t i = 0; i < res.objetos.size(); ++i)
                 if (res.pasoResultado[i] <= mostrados) {
                     Vector2 s = view.worldToScreen(res.objetos[i]->x, res.objetos[i]->y);
                     DrawCircleV(s, 3.0f, RED);
                 }
         }
 
-        if (arrastrando) {                                      // rectangulo "en vivo"
+        if (arrastrando) {                                      // rectangulo mientras arrastras
             Vector2 m = GetMousePosition();
             Rectangle r{ std::min(inicio.x, m.x), std::min(inicio.y, m.y),
                          (float)fabs(m.x - inicio.x), (float)fabs(m.y - inicio.y) };
             DrawRectangleLinesEx(r, 1.5f, Fade(YELLOW, 0.7f));
         }
 
-        drawPanel(res, (int)vivos.size());                      // (7) tiempos
+        drawPanel(res, (int)vivos.size());
         if (res.hecho)
             DrawText(TextFormat("Paso %d / %d  (ESPACIO avanza, R reinicia)",
                                 mostrados, (int)res.visitadas.size()),

@@ -10,6 +10,7 @@
 #include "src/linear_search.hpp"
 
 using Clock = std::chrono::high_resolution_clock;
+
 static double ms(Clock::time_point a, Clock::time_point b) {
     return std::chrono::duration<double, std::milli>(b - a).count();
 }
@@ -51,9 +52,7 @@ int main(int argc, char** argv) {
 
     std::mt19937 rng(42);
 
-    // ============================================================
-    // 1) DEMO DE CORRECTITUD: R-Tree vs busqueda lineal coinciden.
-    // ============================================================
+    // 1) correctitud: el R-Tree debe devolver el mismo conjunto que la lineal
     {
         RTree tree(8);
         for (const auto& o : all) tree.insert(&o);
@@ -105,10 +104,7 @@ int main(int argc, char** argv) {
                   << "; sigue apareciendo en KNN: " << (stillThere ? "SI (bug)" : "NO") << "\n\n";
     }
 
-    // ============================================================
-    // 2) BENCHMARK PARA EL INFORME: 3 tamanos, R-Tree vs lineal.
-    //    Muestra el efecto del tamano del rectangulo (rango) y de k (KNN).
-    // ============================================================
+    // 2) benchmark: para 3 tamanos, efecto del tamano del rectangulo (rango) y de k (KNN)
     std::vector<size_t> sizes    = { 1000, 5000, 15000 };
     std::vector<double> rectFrac = { 0.01, 0.05, 0.10 }; // % de la extension
     std::vector<int>    kValues  = { 1, 10, 50 };

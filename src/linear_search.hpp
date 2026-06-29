@@ -3,6 +3,9 @@
 #include <algorithm>
 #include "spatial_object.hpp"
 
+// solucion ingenua: revisa los n objetos uno por uno (O(n)). es la base de comparacion:
+// el R-Tree gana porque no los revisa todos. 'reviewed' = cuantos miro (metrica).
+
 inline std::vector<const SpatialObject*> linearRange(const std::vector<SpatialObject>& objs, const MBR& region, long long& reviewed) {
     std::vector<const SpatialObject*> res;
     reviewed = 0;                   // contar numero de comprobaciones

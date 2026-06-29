@@ -5,7 +5,8 @@
 #include "geometry.hpp"
 #include "spatial_object.hpp"
 
-// Nodos basados en punteros. Una hoja guarda objetos; un nodo interno guarda hijos.
+// cada nodo tiene un MBR que encierra todo lo de abajo (cajas dentro de cajas).
+// hoja = objetos reales; interno = hijos. la poda en las consultas sale de esos MBR.
 class RTree {
 public:
     struct Node;
@@ -24,7 +25,8 @@ public:
         explicit Node(bool isLeaf) : leaf(isLeaf) {}
     };
 
-    explicit RTree(int maxEntries = 8) : 
+    // maxEntries = tope por nodo (al pasarse, se parte). minEntries = mitad.
+    explicit RTree(int maxEntries = 8) :
         maxEntries_(maxEntries),
         minEntries_(std::max(2, maxEntries / 2)) {
         root_ = new Node(true);
@@ -35,7 +37,8 @@ public:
     RTree(const RTree&) = delete;
     RTree& operator=(const RTree&) = delete;
 
-    // ---- Insercion ----
+    // baja a la mejor hoja (chooseLeaf), mete el objeto; si la hoja se pasa de
+    // maxEntries se parte (split); adjustTree sube arreglando MBRs y propagando el split.
     void insert(const SpatialObject* obj) {
         Entry e;
         e.mbr = MBR::fromPoint(obj->point());
@@ -51,9 +54,9 @@ public:
         adjustTree(leaf, split);
     }
 
-    // ---- Eliminacion (por id de objeto) ----
-    // Version simple: localiza la hoja, borra la entrada y reinserta huerfanos si
-    // el nodo queda por debajo del minimo. Cumple la "funcionalidad minima" del PDF.
+    // a diferencia de B+ (que hace merge/redistribute entre hermanos), aca el underflow
+    // se resuelve por reinsercion: borra la entrada, condenseTree saca los objetos de los
+    // nodos que quedaron por debajo del minimo, y se reinsertan desde la raiz.
     bool remove(int id) {
         Node* leaf = nullptr;
         int idx = -1;
@@ -62,11 +65,11 @@ public:
         leaf->entries.erase(leaf->entries.begin() + idx);
 
         std::vector<const SpatialObject*> orphans;
-        condenseTree(leaf, orphans);
+        condenseTree(leaf, orphans);                        // recoge huerfanos por underflow
 
-        for (auto* o : orphans) insert(o);
+        for (auto* o : orphans) insert(o);                  // reinsertar (mantiene balance)
 
-        // Si la raiz interna quedo con un solo hijo, baja un nivel.
+        // si la raiz interna quedo con un solo hijo, baja un nivel (arbol encoge)
         if (!root_->leaf && root_->entries.size() == 1) {
             Node* child = root_->entries[0].child;
             child->parent = nullptr;
@@ -76,11 +79,9 @@ public:
         return true;
     }
 
-    // ---- Consulta por rango rectangular ----
-    // 'visitedNodes' acumula cuantos nodos se examinaron (metrica vs busqueda lineal).
-    // 'visitadas' (opcional): si se pasa, guarda el MBR de cada nodo examinado (para dibujar).
-    // 'pasoResultado' (opcional): por cada resultado, el nro de paso (nodos visitados) en que
-    //   se encontro, para revelarlos en sincronia con las cajas en la visualizacion.
+    // DFS podando: solo baja a los nodos cuyo MBR toca la region (el resto se descarta).
+    // visitedNodes = cuantos nodos abrio (metrica vs lineal). visitadas/pasoResultado = opcionales,
+    // para dibujar las cajas recorridas y revelar cada resultado en su paso.
     std::vector<const SpatialObject*> rangeQuery(const MBR& region, long long& visitedNodes,
                                                  std::vector<MBR>* visitadas = nullptr,
                                                  std::vector<int>* pasoResultado = nullptr) const {
@@ -90,13 +91,13 @@ public:
         return res;
     }
 
-    // ---- KNN: k vecinos mas cercanos a un punto ----
-    // Recorrido best-first con poda por mindist sobre los MBRs.
+    // best-first: saca siempre lo mas cercano de la cola. al sacar k objetos termina;
+    // lo que queda en la cola esta garantizado mas lejos -> no se mira.
     std::vector<const SpatialObject*> kNN(const Point& q, int k, long long& visitedNodes,
                                           std::vector<MBR>* visitadas = nullptr,
                                           std::vector<int>* pasoResultado = nullptr) const {
         visitedNodes = 0;
-        // Cola de prioridad por menor distancia: entradas (nodo o objeto).
+        // cola por menor distancia. mete nodos (con mindist de su caja) y objetos (dist real).
         struct QItem {
             double dist;
             bool isObj;
@@ -117,6 +118,8 @@ public:
             }
             ++visitedNodes;
             if (visitadas) visitadas->push_back(nodeMBR(it.node));
+            // expandir el nodo: hoja -> mete sus objetos; interno -> mete sus hijos.
+            // mindist2 = cota inferior de distancia a cualquier punto de esa caja.
             for (const auto& e : it.node->entries) {
                 if (it.node->leaf) {
                     double dx = e.obj->x - q.x, dy = e.obj->y - q.y;
@@ -131,7 +134,7 @@ public:
 
     int height() const { return heightRec(root_); }
 
-    // ---- Para visualizacion: MBR de cada nodo con su nivel (0 = raiz) ----
+    // MBR de cada nodo con su nivel (para dibujar el arbol por niveles)
     std::vector<std::pair<int, MBR>> nodeMBRs() const {
         std::vector<std::pair<int, MBR>> out;
         collectNodeMBRs(root_, 0, out);
@@ -143,14 +146,15 @@ private:
     int maxEntries_;
     int minEntries_;
 
-    // --- MBR de un nodo: union de las MBRs de sus entradas ---
+    // MBR de un nodo = union de las cajas de sus entradas
     static MBR nodeMBR(const Node* n) {
         MBR m = MBR::empty();
         for (const auto& e : n->entries) m.expand(e.mbr);
         return m;
     }
 
-    // --- chooseLeaf: descender por menor enlargement (desempate por menor area) ---
+    // baja eligiendo en cada nivel el hijo cuya caja crece menos al meter m
+    // (enlargement minimo; desempate: la de menor area). asi desordena lo menos posible.
     Node* chooseLeaf(Node* n, const MBR& m) {
         while (!n->leaf) {
             int best = 0;
@@ -168,11 +172,12 @@ private:
         return n;
     }
 
-    // --- adjustTree: propaga MBRs y splits hacia la raiz ---
+    // sube desde n hasta la raiz: agranda los MBR de los padres y, si hubo split,
+    // mete el nodo nuevo en el padre (que a su vez puede partirse y subir el split).
     void adjustTree(Node* n, Node* split) {
         while (n != root_) {
             Node* parent = n->parent;
-            // Actualizar la MBR de la entrada que apunta a n.
+            // reajustar la caja de la entrada que apunta a n
             for (auto& e : parent->entries)
                 if (e.child == n) { e.mbr = nodeMBR(n); break; }
 
@@ -187,7 +192,7 @@ private:
             }
             n = parent;
         }
-        // Llegamos a la raiz: si se partio, crear nueva raiz.
+        // si el split llego hasta la raiz, se crea una raiz nueva (arbol crece hacia arriba)
         if (split) {
             Node* newRoot = new Node(false);
             Entry a; a.child = root_;  a.mbr = nodeMBR(root_);  root_->parent = newRoot;
@@ -198,13 +203,14 @@ private:
         }
     }
 
-    // --- Split cuadratico (requisito obligatorio del proyecto) ---
-    // Devuelve un nodo nuevo con la mitad de las entradas; 'n' conserva la otra mitad.
+    // split cuadratico: reparte las entradas de un nodo lleno en dos.
+    // 'n' se queda con un grupo y se devuelve un nodo nuevo con el otro.
     Node* quadraticSplit(Node* n) {
         std::vector<Entry> all = std::move(n->entries);
         n->entries.clear();
 
-        // 1) pickSeeds: par que maximiza el "desperdicio" de area si van juntas.
+        // pickSeeds: las 2 semillas = el par que mas area desperdiciaria junto (las mas separadas).
+        // es O(n^2) sobre las entradas del nodo (pocas), de ahi lo de "cuadratico".
         int s1 = 0, s2 = 1;
         double worst = -1.0;
         for (int i = 0; i < (int)all.size(); ++i)
@@ -225,9 +231,9 @@ private:
         used[s1] = used[s2] = true;
         int remaining = (int)all.size() - 2;
 
-        // 2-3) pickNext: asignar al grupo de menor incremento de area.
+        // pickNext: reparte el resto, cada uno al grupo cuya caja crece menos.
         while (remaining > 0) {
-            // Si un grupo necesita todos los restantes para alcanzar el minimo, dárselos.
+            // si a un grupo le faltan justo todos los restantes para el minimo, se los lleva
             if ((int)n->entries.size() + remaining <= minEntries_) {
                 assignRest(all, used, n, mbr1);
                 break;
@@ -237,7 +243,7 @@ private:
                 break;
             }
 
-            // Elegir la entrada con mayor diferencia de costo entre ambos grupos.
+            // toca la entrada con mayor diferencia de costo entre grupos (la mas "decidida")
             int pick = -1; double bestDiff = -1.0; double enl1 = 0, enl2 = 0;
             for (int i = 0; i < (int)all.size(); ++i) {
                 if (used[i]) continue;
@@ -247,7 +253,7 @@ private:
                 if (diff > bestDiff) { bestDiff = diff; pick = i; enl1 = e1; enl2 = e2; }
             }
 
-            // Colocar en el grupo de menor incremento (desempates: area, luego cantidad).
+            // al grupo de menor crecimiento (desempates: menor area, luego menos lleno)
             Node* target;
             MBR* tmbr;
             if (enl1 < enl2)       { target = n;  tmbr = &mbr1; }
@@ -266,6 +272,7 @@ private:
         return nn;
     }
 
+    // vuelca todas las entradas que quedan en un grupo (para respetar el minimo)
     void assignRest(std::vector<Entry>& all, std::vector<bool>& used, Node* target, MBR& tmbr) {
         for (int i = 0; i < (int)all.size(); ++i) {
             if (used[i]) continue;
@@ -276,9 +283,9 @@ private:
         }
     }
 
-    // --- Busqueda por rango ---
-    void rangeRec(const Node* n, const MBR& region,
-                  std::vector<const SpatialObject*>& res, long long& visited,
+    // DFS: en hoja agrega los puntos dentro de la region; en interno solo recurre a los
+    // hijos cuyo MBR toca la region (los que no tocan se podan, no se abren).
+    void rangeRec(const Node* n, const MBR& region, std::vector<const SpatialObject*>& res, long long& visited,
                   std::vector<MBR>* visitadas, std::vector<int>* pasoResultado) const {
         ++visited;
         if (visitadas) visitadas->push_back(nodeMBR(n));
@@ -288,13 +295,14 @@ private:
                     res.push_back(e.obj);
                     if (pasoResultado) pasoResultado->push_back((int)visited);
                 }
-            } else if (region.intersects(e.mbr)) {
+            }
+            else if (region.intersects(e.mbr)) {
                 rangeRec(e.child, region, res, visited, visitadas, pasoResultado);
             }
         }
     }
 
-    // --- Soporte para remove ---
+    // busca el id recorriendo todo el arbol (no es espacial: el remove es por id, no por zona)
     bool findLeaf(Node* n, int id, Node*& outLeaf, int& outIdx) {
         if (n->leaf) {
             for (int i = 0; i < (int)n->entries.size(); ++i)
@@ -308,7 +316,9 @@ private:
 
     void findLeafNode(Node*, int, Node*&, int&) {} // (reservado)
 
-    // Tras un borrado, propaga hacia arriba y recoge huerfanos de nodos infrapoblados.
+    // sube desde la hoja: si un nodo quedo con menos del minimo (underflow), lo elimina
+    // y guarda sus objetos como huerfanos (luego remove() los reinserta). si no, solo
+    // reajusta el MBR del padre. (en B+ aca se haria merge/redistribution con hermanos).
     void condenseTree(Node* n, std::vector<const SpatialObject*>& orphans) {
         while (n != root_) {
             Node* parent = n->parent;
@@ -317,38 +327,42 @@ private:
                 if (parent->entries[i].child == n) { idx = i; break; }
 
             if ((int)n->entries.size() < minEntries_) {
-                // Recolectar todos los objetos de hoja del subarbol y eliminar el nodo.
+                // underflow: sacar todos los objetos del subarbol y borrar el nodo
                 collectObjects(n, orphans);
                 parent->entries.erase(parent->entries.begin() + idx);
                 destroy(n);
-            } else {
+            } 
+            else {
                 parent->entries[idx].mbr = nodeMBR(n);
             }
             n = parent;
         }
     }
 
-    // Recoge todos los objetos de las hojas de un subarbol.
+    // baja hasta las hojas y junta todos sus objetos
     void collectObjects(Node* n, std::vector<const SpatialObject*>& out) {
         if (n->leaf) {
             for (auto& e : n->entries) out.push_back(e.obj);
-        } else {
+        } 
+        else {
             for (auto& e : n->entries) collectObjects(e.child, out);
         }
     }
 
-    void collectNodeMBRs(const Node* n, int level,
-                         std::vector<std::pair<int, MBR>>& out) const {
+    // DFS guardando (nivel, MBR) de cada nodo
+    void collectNodeMBRs(const Node* n, int level, std::vector<std::pair<int, MBR>>& out) const {
         out.push_back({ level, nodeMBR(n) });
         if (!n->leaf)
             for (const auto& e : n->entries) collectNodeMBRs(e.child, level + 1, out);
     }
 
+    // altura: baja por un solo hijo (el arbol esta balanceado, todas las hojas al mismo nivel)
     int heightRec(const Node* n) const {
         if (n->leaf) return 1;
         return 1 + heightRec(n->entries[0].child);
     }
 
+    // libera el subarbol (recursivo)
     void destroy(Node* n) {
         if (!n) return;
         if (!n->leaf)

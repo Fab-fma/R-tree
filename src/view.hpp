@@ -75,9 +75,7 @@ inline void drawMBR(const View& v, const MBR& m, Color c, float thick) {
     DrawRectangleLinesEx(r, thick, c);
 }
 
-//  Dibuja todos los puntos del dataset (un pixel por punto). Con ~25k puntos
-//  esto es barato de hacer cada frame, y al pasar por worldToScreen respeta el
-//  zoom y el pan automaticamente.
+// un pixel por punto (barato cada frame). pasa por worldToScreen, asi respeta zoom/pan.
 inline void drawPoints(const View& v, const std::vector<SpatialObject>& objs) {
     for (const auto& o : objs) {
         Vector2 s = v.worldToScreen(o.x, o.y);
@@ -93,9 +91,7 @@ inline void drawPoints(const View& v, const std::vector<const SpatialObject*>& o
     }
 }
 
-//  Medicion de tiempo estable: corre 'fn' N veces y devuelve el promedio en ms.
-//  Una sola consulta dura microsegundos y el numero salta mucho; promediar da
-//  un valor fiable.
+// corre 'fn' N veces y promedia (ms). una sola consulta es muy ruidosa para medir.
 template <typename Fn>
 double medirMs(Fn fn, int N) {
     using Clock = std::chrono::high_resolution_clock;
