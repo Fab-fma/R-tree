@@ -106,66 +106,86 @@ int main(int argc, char** argv) {
     }
 
     // ============================================================
-    // 2) EXPERIMENTOS: 3 tamanos, R-Tree vs lineal.
+    // 2) BENCHMARK PARA EL INFORME: 3 tamanos, R-Tree vs lineal.
+    //    Muestra el efecto del tamano del rectangulo (rango) y de k (KNN).
     // ============================================================
-    std::vector<size_t> sizes = { 1000, 5000, 15000 };
-    const int NQ = 50; // consultas promediadas por experimento
-
-    std::cout << "=== EXPERIMENTOS (promedio de " << NQ << " consultas) ===\n";
-    std::cout << std::left
-              << std::setw(8)  << "n"
-              << std::setw(12) << "build(ms)"
-              << std::setw(13) << "rangeRT(ms)"
-              << std::setw(13) << "rangeLin(ms)"
-              << std::setw(11) << "knnRT(ms)"
-              << std::setw(12) << "knnLin(ms)"
-              << std::setw(12) << "nodosRT"
-              << std::setw(12) << "revLin" << "\n";
-    std::cout << std::string(93, '-') << "\n";
+    std::vector<size_t> sizes    = { 1000, 5000, 15000 };
+    std::vector<double> rectFrac = { 0.01, 0.05, 0.10 }; // % de la extension
+    std::vector<int>    kValues  = { 1, 10, 50 };
+    const int NQ = 200; // consultas promediadas por configuracion
 
     for (size_t n : sizes) {
         if (n > all.size()) n = all.size();
         std::vector<SpatialObject> sub(all.begin(), all.begin() + n);
         Bounds b = computeBounds(sub);
+        double extX = b.maxX - b.minX, extY = b.maxY - b.minY;
 
+        // Tiempo de construccion del R-Tree.
         auto t0 = Clock::now();
         RTree tree(8);
         for (const auto& o : sub) tree.insert(&o);
         auto t1 = Clock::now();
-        double buildMs = ms(t0, t1);
+
+        std::cout << "\n========================================================\n";
+        std::cout << std::setprecision(3)
+                  << " n = " << n << "   |   construccion R-Tree: " << ms(t0, t1)
+                  << " ms   |   altura: " << tree.height() << "\n";
+        std::cout << "========================================================\n";
 
         std::uniform_real_distribution<double> ux(b.minX, b.maxX), uy(b.minY, b.maxY);
-        double rangeRT = 0, rangeLin = 0, knnRT = 0, knnLin = 0;
-        long long nodosRT = 0, revLin = 0;
-        double wHalf = (b.maxX - b.minX) * 0.05, hHalf = (b.maxY - b.minY) * 0.05;
 
-        for (int q = 0; q < NQ; ++q) {
-            double cx = ux(rng), cy = uy(rng);
-            MBR region{ cx - wHalf, cy - hHalf, cx + wHalf, cy + hHalf };
-            long long vis = 0, rev = 0;
-
-            auto a0 = Clock::now(); auto r1 = tree.rangeQuery(region, vis); auto a1 = Clock::now();
-            auto r2 = linearRange(sub, region, rev);                       auto a2 = Clock::now();
-            rangeRT += ms(a0, a1); rangeLin += ms(a1, a2);
-            nodosRT += vis; revLin += rev;
-
-            Point pq{ ux(rng), uy(rng) };
-            long long vk = 0, rk = 0;
-            auto b0 = Clock::now(); auto k1 = tree.kNN(pq, 10, vk); auto b1 = Clock::now();
-            auto k2 = linearKNN(sub, pq, 10, rk);                  auto b2 = Clock::now();
-            knnRT += ms(b0, b1); knnLin += ms(b1, b2);
+        // ---- RANGO: efecto del tamano del rectangulo ----
+        std::cout << "\n  [RANGO]  efecto del tamano del rectangulo\n";
+        std::cout << "  " << std::left
+                  << std::setw(8)  << "rect%"   << std::setw(12) << "RT(ms)"
+                  << std::setw(12) << "Lin(ms)"  << std::setw(11) << "speedup"
+                  << std::setw(12) << "nodosRT"  << std::setw(12) << "revLin"
+                  << std::setw(10) << "result"   << "\n";
+        for (double f : rectFrac) {
+            double wHalf = extX * f / 2, hHalf = extY * f / 2;
+            double tRT = 0, tLin = 0; long long nodos = 0, rev = 0, results = 0;
+            for (int q = 0; q < NQ; ++q) {
+                double cx = ux(rng), cy = uy(rng);
+                MBR region{ cx - wHalf, cy - hHalf, cx + wHalf, cy + hHalf };
+                long long vis = 0, rv = 0;
+                auto a0 = Clock::now(); auto r1 = tree.rangeQuery(region, vis); auto a1 = Clock::now();
+                auto r2 = linearRange(sub, region, rv);                         auto a2 = Clock::now();
+                tRT += ms(a0, a1); tLin += ms(a1, a2);
+                nodos += vis; rev += rv; results += (long long)r1.size();
+            }
+            double rt = tRT / NQ, lin = tLin / NQ;
+            std::cout << "  " << std::left << std::setprecision(4)
+                      << std::setw(8)  << (f * 100) << std::setw(12) << rt
+                      << std::setw(12) << lin << std::setw(11) << (rt > 0 ? lin / rt : 0)
+                      << std::setw(12) << (nodos / NQ) << std::setw(12) << (rev / NQ)
+                      << std::setw(10) << (results / NQ) << "\n";
         }
 
-        std::cout << std::left << std::setprecision(4)
-                  << std::setw(8)  << n
-                  << std::setw(12) << buildMs
-                  << std::setw(13) << rangeRT / NQ
-                  << std::setw(13) << rangeLin / NQ
-                  << std::setw(11) << knnRT / NQ
-                  << std::setw(12) << knnLin / NQ
-                  << std::setw(12) << nodosRT / NQ
-                  << std::setw(12) << revLin / NQ << "\n";
+        // ---- KNN: efecto del valor de k ----
+        std::cout << "\n  [KNN]  efecto del valor de k\n";
+        std::cout << "  " << std::left
+                  << std::setw(8)  << "k"       << std::setw(12) << "RT(ms)"
+                  << std::setw(12) << "Lin(ms)"  << std::setw(11) << "speedup"
+                  << std::setw(12) << "nodosRT"  << std::setw(12) << "revLin" << "\n";
+        for (int k : kValues) {
+            double tRT = 0, tLin = 0; long long nodos = 0, rev = 0;
+            for (int q = 0; q < NQ; ++q) {
+                Point p{ ux(rng), uy(rng) };
+                long long vis = 0, rv = 0;
+                auto a0 = Clock::now(); auto r1 = tree.kNN(p, k, vis); auto a1 = Clock::now();
+                auto r2 = linearKNN(sub, p, k, rv);                   auto a2 = Clock::now();
+                tRT += ms(a0, a1); tLin += ms(a1, a2);
+                nodos += vis; rev += rv;
+            }
+            double rt = tRT / NQ, lin = tLin / NQ;
+            std::cout << "  " << std::left << std::setprecision(4)
+                      << std::setw(8)  << k << std::setw(12) << rt
+                      << std::setw(12) << lin << std::setw(11) << (rt > 0 ? lin / rt : 0)
+                      << std::setw(12) << (nodos / NQ) << std::setw(12) << (rev / NQ) << "\n";
+        }
     }
-    std::cout << "\nnodosRT = nodos del R-Tree visitados (rango); revLin = elementos revisados por busqueda lineal.\n";
+
+    std::cout << "\n(promedio de " << NQ << " consultas aleatorias por fila)\n";
+    std::cout << "nodosRT = nodos del R-Tree visitados; revLin = elementos revisados por la lineal.\n";
     return 0;
 }

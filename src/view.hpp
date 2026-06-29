@@ -93,7 +93,7 @@ inline void drawMBR(const View& v, const MBR& m, Color c, float thick) {
 inline void drawPoints(const View& v, const std::vector<SpatialObject>& objs) {
     for (const auto& o : objs) {
         Vector2 s = v.worldToScreen(o.x, o.y);
-        DrawPixelV(s, GRAY);
+        DrawPixelV(s, GRAY);   // un pixel por punto: barato y fluido aunque haya muchos
     }
 }
 
